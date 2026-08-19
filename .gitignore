@@ -10,3 +10,5 @@ cdm.json
 __pycache__/
 *.pyc
 .DS_Store
+playwright-report/
+test-results/

@@ -26,6 +26,7 @@ export async function prepareMatchForDevnet(
   session: ProductSession,
   snapshot: MatchSnapshot,
 ): Promise<PreparedMatch> {
+  if (snapshot.settleable === false) throw new Error(snapshot.settlementBlockReason || 'Interrupted matches cannot be settled on-chain.');
   const replayCid = await session.uploadReplay(snapshot);
   const matchId = await deriveMatchId(replayCid, snapshot);
   const identityProof = await session.proveDotIdentity(`PolkaCrew match attestation\n${matchId}`, session.username);
@@ -90,6 +91,7 @@ export async function verifyOnChainProposal(
 }
 
 export function participantsForSettlement(snapshot: MatchSnapshot, winner: Role) {
+  if (snapshot.settleable === false) throw new Error(snapshot.settlementBlockReason || 'Interrupted matches cannot be settled on-chain.');
   const participants = snapshot.players.map(player => {
     if (!player.h160Address) throw new Error(`${player.name} is missing a Product Account H160 address.`);
     return {

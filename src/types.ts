@@ -29,13 +29,30 @@ export interface MatchSnapshot {
   startedAt: number;
   endedAt?: number;
   winner?: Role;
+  settleable?: boolean;
+  settlementBlockReason?: string;
   players: Array<Pick<Player, 'id' | 'name' | 'role' | 'alive' | 'tasksDone' | 'h160Address' | 'productAddress'>>;
   events: GameEvent[];
 }
 
 export interface GameEvent {
   t: number;
-  type: 'move' | 'task' | 'kill' | 'meeting' | 'vote' | 'end';
+  type:
+    | 'move'
+    | 'task'
+    | 'kill'
+    | 'report'
+    | 'meeting'
+    | 'vote'
+    | 'eject'
+    | 'sabotage'
+    | 'sabotage-fixed'
+    | 'door-lock'
+    | 'disconnect'
+    | 'reconnect'
+    | 'forfeit'
+    | 'end'
+    | 'abort';
   actor?: string;
   target?: string;
   data?: Record<string, unknown>;

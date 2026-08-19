@@ -1,6 +1,6 @@
 import type { MatchSnapshot, Role } from '../types';
 import { canonicalJson } from './canonical';
-import { createMatchContractAdapter, type ChainMatchStatus, type MatchContractStatus } from './contract';
+import { createMatchContractAdapter, type ChainMatchStatus, type MatchContractStatus, type PlayerStats } from './contract';
 import { readPolkaCrewPersonhood, type PersonhoodStatus } from './personhood';
 
 export type ProductMode = 'local' | 'polkadot-host';
@@ -39,6 +39,8 @@ export interface ProductSession {
     won: boolean[];
   }) => Promise<void>;
   attestMatch: (matchId: `0x${string}`) => Promise<void>;
+  cancelExpiredMatch: (matchId: `0x${string}`) => Promise<void>;
+  getPlayerStats: (h160Address: `0x${string}`) => Promise<PlayerStats | null>;
   getMatchStatus: (matchId: `0x${string}`) => Promise<ChainMatchStatus | null>;
   hasAttested: (matchId: `0x${string}`, h160Address: `0x${string}`) => Promise<boolean>;
   getMatchParticipants: (matchId: `0x${string}`) => Promise<`0x${string}`[]>;
@@ -155,6 +157,8 @@ export async function connectPolkadotProduct(): Promise<ProductSession> {
       },
       proposeMatch: contractAdapter.proposeMatch,
       attestMatch: contractAdapter.attestMatch,
+      cancelExpiredMatch: contractAdapter.cancelExpiredMatch,
+      getPlayerStats: contractAdapter.getStats,
       getMatchStatus: contractAdapter.getMatch,
       hasAttested: contractAdapter.hasAttested,
       getMatchParticipants: contractAdapter.getParticipants,
@@ -178,6 +182,8 @@ export async function connectPolkadotProduct(): Promise<ProductSession> {
       proveDotIdentity: async () => null,
       proposeMatch: unavailable,
       attestMatch: unavailable,
+      cancelExpiredMatch: unavailable,
+      getPlayerStats: async () => null,
       getMatchStatus: async () => null,
       hasAttested: async () => false,
       getMatchParticipants: async () => [],

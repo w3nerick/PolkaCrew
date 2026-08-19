@@ -15,7 +15,17 @@ export interface ChainMatchStatus {
   playerCount?: number;
   attestations?: number;
   createdAt?: bigint;
+  expiresAt?: bigint;
   finalized?: boolean;
+  cancelled?: boolean;
+}
+
+export interface PlayerStats {
+  games: bigint;
+  wins: bigint;
+  crewWins: bigint;
+  saboteurWins: bigint;
+  xp: bigint;
 }
 
 export interface MatchContractAdapter {
@@ -28,7 +38,9 @@ export interface MatchContractAdapter {
     won: boolean[];
   }): Promise<void>;
   attestMatch(matchId: `0x${string}`): Promise<void>;
+  cancelExpiredMatch(matchId: `0x${string}`): Promise<void>;
   getMatch(matchId: `0x${string}`): Promise<ChainMatchStatus | null>;
+  getStats(h160Address: `0x${string}`): Promise<PlayerStats | null>;
   hasAttested(matchId: `0x${string}`, h160Address: `0x${string}`): Promise<boolean>;
   getParticipants(matchId: `0x${string}`): Promise<`0x${string}`[]>;
   participantWon(matchId: `0x${string}`, h160Address: `0x${string}`): Promise<boolean | null>;
@@ -98,10 +110,19 @@ export async function createMatchContractAdapter(context: ContractContext): Prom
         await ensureMapped();
         await contract.attestMatch.tx(matchId);
       },
+      cancelExpiredMatch: async matchId => {
+        await ensureMapped();
+        await contract.cancelExpiredMatch.tx(matchId);
+      },
       getMatch: async matchId => {
         const result = await contract.matches.query(matchId);
         if (!result?.success) return null;
         return normalizeMatch(result.value);
+      },
+      getStats: async h160Address => {
+        const result = await contract.stats.query(h160Address);
+        if (!result?.success) return null;
+        return normalizeStats(result.value);
       },
       hasAttested: async (matchId, h160Address) => {
         const result = await contract.attested.query(matchId, h160Address);
@@ -130,7 +151,9 @@ function unavailable(reason: string): MatchContractAdapter {
     status: { configured: false, reason },
     proposeMatch: reject,
     attestMatch: reject,
+    cancelExpiredMatch: reject,
     getMatch: async () => null,
+    getStats: async () => null,
     hasAttested: async () => false,
     getParticipants: async () => [],
     participantWon: async () => null,
@@ -144,8 +167,10 @@ function normalizeMatch(value: any): ChainMatchStatus {
       winner: Number(value[1]),
       playerCount: Number(value[2]),
       attestations: Number(value[3]),
-      createdAt: typeof value[4] === 'bigint' ? value[4] : BigInt(value[4] ?? 0),
-      finalized: Boolean(value[5]),
+      createdAt: toBigInt(value[4]),
+      expiresAt: toBigInt(value[5]),
+      finalized: Boolean(value[6]),
+      cancelled: Boolean(value[7]),
     };
   }
   return {
@@ -153,9 +178,28 @@ function normalizeMatch(value: any): ChainMatchStatus {
     winner: value?.winner == null ? undefined : Number(value.winner),
     playerCount: value?.playerCount == null ? Number(value?.player_count ?? 0) : Number(value.playerCount),
     attestations: value?.attestations == null ? undefined : Number(value.attestations),
-    createdAt: value?.createdAt == null && value?.created_at == null ? undefined : BigInt(value.createdAt ?? value.created_at),
+    createdAt: value?.createdAt == null && value?.created_at == null ? undefined : toBigInt(value.createdAt ?? value.created_at),
+    expiresAt: value?.expiresAt == null && value?.expires_at == null ? undefined : toBigInt(value.expiresAt ?? value.expires_at),
     finalized: value?.finalized == null ? undefined : Boolean(value.finalized),
+    cancelled: value?.cancelled == null ? undefined : Boolean(value.cancelled),
   };
+}
+
+function normalizeStats(value: any): PlayerStats {
+  const row = Array.isArray(value) ? value : [value?.games, value?.wins, value?.crewWins ?? value?.crew_wins, value?.saboteurWins ?? value?.saboteur_wins, value?.xp];
+  return {
+    games: toBigInt(row[0]) ?? 0n,
+    wins: toBigInt(row[1]) ?? 0n,
+    crewWins: toBigInt(row[2]) ?? 0n,
+    saboteurWins: toBigInt(row[3]) ?? 0n,
+    xp: toBigInt(row[4]) ?? 0n,
+  };
+}
+
+function toBigInt(value: unknown): bigint | undefined {
+  if (value == null) return undefined;
+  try { return typeof value === 'bigint' ? value : BigInt(value as string | number); }
+  catch { return undefined; }
 }
 
 function scalarBoolean(value: any): boolean {

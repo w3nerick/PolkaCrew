@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.1
+
+- Merged the Neon Orbital asset pack from the current GitHub `main` into the v0.5 pre-deploy gameplay.
+- Relay Ark now renders beneath the v0.5 collision/sabotage layer.
+- Relay Beacon renders task terminals and keeps completion/pulse states.
+- Added deterministic crew skins using Relay Ranger, Chain Mechanic, Bulletin Diver, Validator Warden and Orbit Medic.
+- Fork Wraith remains local-role-only so the visual system cannot reveal the saboteur to other clients.
+- Bodies and ghosts now reuse the visual asset family while preserving REPORT and ghost gameplay.
+- Kept v0.5 reconnect, sabotage, minigame, relay-hardening, Product-host E2E and contract-expiry work intact.
+- Added `game-effects.css` and the Neon Orbital prompt sheet to the pre-deploy candidate.
+
+## 0.5.0
+
+- Added persistent bodies and distance-validated REPORT meetings.
+- Added emergency meeting limits, vote skip, meeting timeout and offline-player adjudication.
+- Added kill, sabotage and emergency cooldowns.
+- Added reactor, lights and door-lock sabotage with repair panels and reactor loss timer.
+- Added real door collision and a larger five-room ship layout.
+- Added four interactive task minigames instead of instant task completion.
+- Added ghosts, procedural UI/game sounds and touch movement controls.
+- Added relay presence events, reconnect grace, lobby host migration and host-loss match aborts.
+- Long disconnects can resolve gameplay but mark the match non-settleable, preventing permanent XP from interrupted matches.
+- Added richer role reveal, projected XP, achievements and player profile stats.
+- Added 30-minute on-chain proposal expiry plus participant cancellation with zero XP/stat mutation.
+- Bumped Product executable metadata to 0.5.0.
+- Added relay production hardening: origin allowlist, per-client rate limiting, empty-room cleanup and a container image.
+
+
+- Added an official Product-host Playwright smoke harness with `@parity/host-api-test-sdk` and a Products Devnet Asset Hub fixture.
+
 ## 0.4.0
 
 - Merged multiplayer into the React Product shell.

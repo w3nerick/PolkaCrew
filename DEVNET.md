@@ -1,4 +1,4 @@
-# PolkaCrew v0.4 · Products Devnet runbook
+# PolkaCrew v0.5 · Products Devnet runbook
 
 PolkaCrew explicitly targets the `devnet` preset. Do not omit `--env devnet` / `-n devnet`: the CLIs have other network defaults.
 
@@ -92,7 +92,7 @@ That command writes `cdm.json` plus `.cdm/` artifacts. The app intentionally doe
 
 ## 5. Product Account contract identity
 
-v0.4 separates identity layers:
+v0.5 separates identity layers:
 
 1. `SignerManager.connect()` connects the user's host wallet.
 2. `SignerManager.getProductAccount("polkacrew.dot")` obtains the app-scoped account.
@@ -137,10 +137,19 @@ When the owner has the required personhood tier:
 pad ./dist polkacrew.dot --env devnet --mnemonic "$MNEMONIC" --publish
 ```
 
-## 8. Before calling v0.4 production-ready
+## 8. v0.5 settlement and disconnect policy
 
-- Replace the Python relay with an HTTPS production service or WebRTC transport.
-- Add reconnect/host migration and disconnect adjudication.
-- Add timeout/dispute rules so unanimous attestation cannot lock a match forever.
-- Run Product-host E2E tests with `@parity/host-api-test-sdk` against an explicit Devnet `NetworkConfig`.
-- Pin all transitive dependencies with a committed lockfile after the first verified install.
+- Brief disconnects get a realtime reconnect grace period.
+- Lobby host loss can migrate to another connected player.
+- Live-match host loss aborts instead of transferring hidden role authority.
+- A long participant disconnect may be adjudicated as a gameplay forfeit, but the final snapshot is marked `settleable: false`; Bulletin/Asset Hub settlement is blocked.
+- Clean on-chain proposals keep unanimous attestation. `PolkaCrewResults` gives them a 30-minute TTL; afterward a listed participant can call `cancelExpiredMatch()` and no XP/stats are changed.
+
+## 9. Before publishing to Bulletin
+
+- Deploy/install the final v0.5 contract and regenerate `src/generated/cdm.ts`.
+- Run `npm run typecheck`, `npm run build`, `npm run test:relay`, and `npm run contracts:build` in a clean environment.
+- Run Product-host E2E with at least 2 real Product Accounts: normal win, report/vote win, reactor win, reconnect within grace, and forced non-settleable disconnect.
+- Confirm one clean match goes Bulletin CID → Asset Hub proposal → every participant attest → `finalized=true` → XP readback.
+- Commit the verified lockfile produced by that clean install.
+- Configure the public HTTPS relay URL for the static Product build.

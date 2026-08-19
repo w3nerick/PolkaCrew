@@ -2,10 +2,12 @@
 pragma solidity ^0.8.28;
 
 /// @notice Consensus-attested match registry for PolkaCrew on Asset Hub / PolkaVM.
-/// @dev Every participant must attest from their own account before stats are finalized.
+/// @dev Clean matches require unanimous participant attestation. Unresolved proposals expire and can be cancelled without minting XP.
 /// @custom:cdm @w3nerick/polkacrew-results
 contract PolkaCrewResults {
     enum Winner { Crew, Saboteur }
+
+    uint64 public constant MATCH_TTL = 30 minutes;
 
     struct Stats {
         uint64 games;
@@ -21,7 +23,9 @@ contract PolkaCrewResults {
         uint32 playerCount;
         uint32 attestations;
         uint64 createdAt;
+        uint64 expiresAt;
         bool finalized;
+        bool cancelled;
     }
 
     mapping(bytes32 => MatchHeader) public matches;
@@ -31,15 +35,20 @@ contract PolkaCrewResults {
     mapping(bytes32 => mapping(address => bool)) public attested;
     mapping(address => Stats) public stats;
 
-    event MatchProposed(bytes32 indexed matchId, string replayCid, Winner winner, uint32 playerCount);
+    event MatchProposed(bytes32 indexed matchId, string replayCid, Winner winner, uint32 playerCount, uint64 expiresAt);
     event MatchAttested(bytes32 indexed matchId, address indexed participant, uint32 attestations);
     event MatchFinalized(bytes32 indexed matchId, string replayCid, Winner winner);
+    event MatchCancelled(bytes32 indexed matchId);
 
     error MatchExists();
+    error MatchNotFound();
     error InvalidParticipants();
     error NotParticipant();
     error AlreadyAttested();
     error AlreadyFinalized();
+    error AlreadyCancelled();
+    error MatchExpired();
+    error MatchNotExpired();
 
     function proposeMatch(
         bytes32 matchId,
@@ -63,21 +72,28 @@ contract PolkaCrewResults {
         }
         if (!senderIncluded) revert NotParticipant();
 
+        uint64 createdAt = uint64(block.timestamp);
+        uint64 expiresAt = createdAt + MATCH_TTL;
         matches[matchId] = MatchHeader({
             replayCid: replayCid,
             winner: winner,
             playerCount: uint32(participants.length),
             attestations: 0,
-            createdAt: uint64(block.timestamp),
-            finalized: false
+            createdAt: createdAt,
+            expiresAt: expiresAt,
+            finalized: false,
+            cancelled: false
         });
 
-        emit MatchProposed(matchId, replayCid, winner, uint32(participants.length));
+        emit MatchProposed(matchId, replayCid, winner, uint32(participants.length), expiresAt);
     }
 
     function attestMatch(bytes32 matchId) external {
         MatchHeader storage m = matches[matchId];
+        if (m.createdAt == 0) revert MatchNotFound();
         if (m.finalized) revert AlreadyFinalized();
+        if (m.cancelled) revert AlreadyCancelled();
+        if (block.timestamp > m.expiresAt) revert MatchExpired();
         if (!isParticipant[matchId][msg.sender]) revert NotParticipant();
         if (attested[matchId][msg.sender]) revert AlreadyAttested();
 
@@ -86,6 +102,18 @@ contract PolkaCrewResults {
         emit MatchAttested(matchId, msg.sender, m.attestations);
 
         if (m.attestations == m.playerCount) _finalize(matchId, m);
+    }
+
+    /// @notice Cancel an unresolved proposal after its attestation window. No XP/stat mutations occur.
+    function cancelExpiredMatch(bytes32 matchId) external {
+        MatchHeader storage m = matches[matchId];
+        if (m.createdAt == 0) revert MatchNotFound();
+        if (m.finalized) revert AlreadyFinalized();
+        if (m.cancelled) revert AlreadyCancelled();
+        if (!isParticipant[matchId][msg.sender]) revert NotParticipant();
+        if (block.timestamp <= m.expiresAt) revert MatchNotExpired();
+        m.cancelled = true;
+        emit MatchCancelled(matchId);
     }
 
     function participants(bytes32 matchId) external view returns (address[] memory) {

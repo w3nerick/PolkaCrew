@@ -8,7 +8,7 @@ function baseUrl() {
 }
 
 /**
- * Tiny relay transport used by the v0.4 MVP.
+ * Tiny relay transport used by the v0.5 pre-deploy candidate.
  *
  * `clientAuth` is never broadcast in room messages. The relay binds it to the
  * room/client pair, so knowing a public client UUID is not enough to spoof an
