@@ -4,6 +4,9 @@
     "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "emitDeclarationOnly": true,
+    "outDir": "./node_modules/.tmp/vite-config",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "allowImportingTsExtensions": true
   },
   "include": ["vite.config.ts"]

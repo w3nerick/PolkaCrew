@@ -1,4 +1,4 @@
-# PolkaCrew v0.5.1 · Neon Orbital pre-deploy candidate
+# PolkaCrew v0.5.2 · Complete game-loop candidate
 
 PolkaCrew is an original multiplayer social-deduction game designed as a native **Polkadot Product**. Realtime movement and game rules stay off-chain for responsiveness; clean match replays and participant consensus use Polkadot Products Devnet.
 
@@ -29,7 +29,7 @@ relay     .dot + personhood             canonical replay
                               finalize XP / stats
 ```
 
-## What v0.5.1 includes
+## What v0.5.2 includes
 
 ### Neon Orbital visual system
 
@@ -39,6 +39,7 @@ relay     .dot + personhood             canonical replay
 - Fork Wraith is visible only to the local player when that player is the saboteur, so cosmetics never leak secret roles.
 - Bodies and ghosts reuse deterministic character artwork with role-safe presentation.
 - Canvas keeps procedural fallbacks if an asset fails to load.
+- Players select one of five crew models before creating or joining a room.
 
 ### Gameplay
 
@@ -49,9 +50,12 @@ relay     .dot + personhood             canonical replay
 - Reactor meltdown, lights outage and physical door-lock sabotage.
 - Crew repair panels; reactor requires two separate repair keys.
 - Real door collision while locks are active.
+- Permanent ship-wall collision validated locally and by the authoritative host.
 - Four task minigames: wires, validator sequence, storage slider and Bulletin chunk pulse.
 - Ghost movement after death, procedural Web Audio cues and touch movement controls.
 - Multi-saboteur allies are revealed only to saboteurs.
+- Living-player meeting chat, vote result countdown and animated ejection/skip/tie resolution.
+- Local match memory with Bulletin CID and Asset Hub finalization status when available.
 
 ### Realtime integrity
 

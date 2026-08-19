@@ -1,19 +1,25 @@
 import { useEffect, useRef } from 'react';
-import { BASE_DOORS, PolkaCrewRoom, ROOM_TASKS, ROOM_WORLD, SABOTAGE_PANELS } from '../multiplayer/room';
-import type { DoorState, RoomBody, RoomPlayer, RoomState } from '../multiplayer/types';
+import { BASE_DOORS, MAP_WALLS, PolkaCrewRoom, ROOM_TASKS, ROOM_WORLD, SABOTAGE_PANELS } from '../multiplayer/room';
+import type { CrewSkinId, DoorState, RoomBody, RoomPlayer, RoomState } from '../multiplayer/types';
 
 const artwork = {
-  deck: loadImage('assets/polkacrew/relay-ark.webp'),
-  crew: loadImage('assets/polkacrew/relay-ranger.png'),
-  mechanic: loadImage('assets/polkacrew/chain-mechanic.png'),
-  diver: loadImage('assets/polkacrew/bulletin-diver.png'),
-  warden: loadImage('assets/polkacrew/validator-warden.png'),
-  medic: loadImage('assets/polkacrew/orbit-medic.png'),
-  saboteur: loadImage('assets/polkacrew/fork-wraith.png'),
-  task: loadImage('assets/polkacrew/relay-beacon.png'),
+  deck: loadImage('/assets/polkacrew/relay-ark.webp'),
+  crew: loadImage('/assets/polkacrew/relay-ranger.png'),
+  mechanic: loadImage('/assets/polkacrew/chain-mechanic.png'),
+  diver: loadImage('/assets/polkacrew/bulletin-diver.png'),
+  warden: loadImage('/assets/polkacrew/validator-warden.png'),
+  medic: loadImage('/assets/polkacrew/orbit-medic.png'),
+  saboteur: loadImage('/assets/polkacrew/fork-wraith.png'),
+  task: loadImage('/assets/polkacrew/relay-beacon.png'),
 };
 
-const crewSkins = [artwork.crew, artwork.mechanic, artwork.diver, artwork.warden, artwork.medic];
+const crewSkins: Record<CrewSkinId, HTMLImageElement> = {
+  'relay-ranger': artwork.crew,
+  'chain-mechanic': artwork.mechanic,
+  'bulletin-diver': artwork.diver,
+  'validator-warden': artwork.warden,
+  'orbit-medic': artwork.medic,
+};
 
 export function MultiplayerCanvas({ room, state }: { room: PolkaCrewRoom; state: RoomState }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -86,6 +92,7 @@ function draw(canvas: HTMLCanvasElement | null, state: RoomState, now: number) {
 
   drawDeck(ctx, w, h, now);
   drawRoomLabels(ctx);
+  drawMapWalls(ctx);
   drawDoors(ctx, state.doors, Date.now());
 
   const completedBySelf = state.completed[state.selfId] ?? [];
@@ -169,6 +176,26 @@ function drawRoomLabels(ctx: CanvasRenderingContext2D) {
   ctx.restore();
 }
 
+function drawMapWalls(ctx: CanvasRenderingContext2D) {
+  ctx.save();
+  for (const wall of MAP_WALLS) {
+    const gradient = ctx.createLinearGradient(wall.x, wall.y, wall.x + wall.width, wall.y + wall.height);
+    gradient.addColorStop(0, '#1a3045');
+    gradient.addColorStop(.5, '#6c3b86');
+    gradient.addColorStop(1, '#17283d');
+    ctx.fillStyle = gradient;
+    ctx.strokeStyle = '#b86bd1';
+    ctx.lineWidth = 2;
+    ctx.shadowColor = '#8e4cba';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.roundRect(wall.x, wall.y, wall.width, wall.height, 5);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawTask(ctx: CanvasRenderingContext2D, x: number, y: number, label: string, completed: boolean, now: number, index: number) {
   ctx.save();
   ctx.translate(x, y);
@@ -242,7 +269,7 @@ function drawSabotage(ctx: CanvasRenderingContext2D, state: RoomState, now: numb
 
 function drawCrew(ctx: CanvasRenderingContext2D, player: RoomPlayer, local: boolean, state: RoomState, now: number) {
   const seed = hash(player.id);
-  const skin = crewSkins[seed % crewSkins.length];
+  const skin = crewSkins[player.skinId] ?? artwork.crew;
   const showSaboteur = local && state.selfRole === 'saboteur';
   const image = showSaboteur ? artwork.saboteur : skin;
   const bob = Math.sin((now + seed) / 220) * 1.8;
@@ -282,7 +309,7 @@ function drawCrew(ctx: CanvasRenderingContext2D, player: RoomPlayer, local: bool
 function drawGhost(ctx: CanvasRenderingContext2D, player: RoomPlayer, local: boolean, state: RoomState, now: number) {
   const seed = hash(player.id);
   const showSaboteur = local && state.selfRole === 'saboteur';
-  const image = showSaboteur ? artwork.saboteur : crewSkins[seed % crewSkins.length];
+  const image = showSaboteur ? artwork.saboteur : crewSkins[player.skinId] ?? artwork.crew;
   ctx.save();
   ctx.translate(player.x, player.y + Math.sin(now / 180 + seed) * 4);
   ctx.globalAlpha = local ? .52 : .22;
@@ -302,7 +329,7 @@ function drawGhost(ctx: CanvasRenderingContext2D, player: RoomPlayer, local: boo
 
 function drawBody(ctx: CanvasRenderingContext2D, body: RoomBody, now: number) {
   const seed = hash(body.victimId);
-  const image = crewSkins[seed % crewSkins.length];
+  const image = crewSkins[body.skinId] ?? artwork.crew;
   ctx.save();
   ctx.translate(body.x, body.y);
   ctx.rotate(-Math.PI / 2);

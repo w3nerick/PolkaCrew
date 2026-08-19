@@ -1,6 +1,7 @@
 import type { GameEvent, MatchSnapshot, Role } from '../types';
 import { RelayClient } from './relay';
 import type {
+  CrewSkinId,
   DoorState,
   MeetingState,
   RelayEnvelope,
@@ -27,6 +28,33 @@ export const SABOTAGE_COOLDOWN_MS = 30_000;
 export const MEETING_COOLDOWN_MS = 25_000;
 export const MEETING_DURATION_MS = 45_000;
 export const DISCONNECT_GRACE_MS = 18_000;
+
+export const CREW_SKINS: Array<{ id: CrewSkinId; label: string; specialty: string; asset: string }> = [
+  { id: 'relay-ranger', label: 'Relay Ranger', specialty: 'Realtime scout', asset: '/assets/polkacrew/relay-ranger.png' },
+  { id: 'chain-mechanic', label: 'Chain Mechanic', specialty: 'Runtime engineer', asset: '/assets/polkacrew/chain-mechanic.png' },
+  { id: 'bulletin-diver', label: 'Bulletin Diver', specialty: 'Storage explorer', asset: '/assets/polkacrew/bulletin-diver.png' },
+  { id: 'validator-warden', label: 'Validator Warden', specialty: 'Consensus guard', asset: '/assets/polkacrew/validator-warden.png' },
+  { id: 'orbit-medic', label: 'Orbit Medic', specialty: 'System recovery', asset: '/assets/polkacrew/orbit-medic.png' },
+];
+
+export interface MapWall { id: string; x: number; y: number; width: number; height: number }
+
+// The four gates are deliberately omitted from these permanent wall segments.
+// BASE_DOORS fills those gaps only while a door-lock sabotage is active.
+export const MAP_WALLS: MapWall[] = [
+  { id: 'hub-north-west', x: 346, y: 216, width: 91, height: 14 },
+  { id: 'hub-north-east', x: 563, y: 216, width: 91, height: 14 },
+  { id: 'hub-south-west', x: 346, y: 390, width: 91, height: 14 },
+  { id: 'hub-south-east', x: 563, y: 390, width: 91, height: 14 },
+  { id: 'hub-west-north', x: 339, y: 223, width: 14, height: 31 },
+  { id: 'hub-west-south', x: 339, y: 366, width: 14, height: 31 },
+  { id: 'hub-east-north', x: 647, y: 223, width: 14, height: 31 },
+  { id: 'hub-east-south', x: 647, y: 366, width: 14, height: 31 },
+  { id: 'people-console', x: 76, y: 264, width: 164, height: 12 },
+  { id: 'bulletin-console', x: 760, y: 264, width: 164, height: 12 },
+  { id: 'relay-console', x: 76, y: 344, width: 164, height: 12 },
+  { id: 'asset-console', x: 760, y: 344, width: 164, height: 12 },
+];
 
 export const ROOM_TASKS: RoomTask[] = [
   { id: 'identity-wires', label: 'Route Identity Wires', room: 'People Lab', kind: 'wires', x: 155, y: 132 },
@@ -68,6 +96,7 @@ export class PolkaCrewRoom {
   private endedAt = 0;
   private lastMoveSent = 0;
   private lastMoveAt: Record<string, number> = {};
+  private lastChatAt: Record<string, number> = {};
   private attested = new Set<string>();
   private state: RoomState;
 
@@ -251,6 +280,11 @@ export class PolkaCrewRoom {
       return;
     }
 
+    if (this.state.meeting?.resolved && this.state.meeting.result && this.state.meeting.result.resumeAt <= now) {
+      this.resumeAfterMeeting();
+      return;
+    }
+
     for (const player of Object.values(this.state.players)) {
       if (!player.connected && player.alive && player.disconnectedAt && now - player.disconnectedAt >= DISCONNECT_GRACE_MS) {
         player.alive = false;
@@ -277,7 +311,7 @@ export class PolkaCrewRoom {
       x: clamp(self.x + input.x / length * speed * dt, 38, ROOM_WORLD.width - 38),
       y: clamp(self.y + input.y / length * speed * dt, 46, ROOM_WORLD.height - 46),
     };
-    const corrected = self.alive ? resolveDoorCollision(self, next, this.state.doors, Date.now()) : next;
+    const corrected = self.alive ? resolveWorldCollision(self, next, this.state.doors, Date.now()) : next;
     self.x = corrected.x;
     self.y = corrected.y;
     if (now - this.lastMoveSent < 65) return;
@@ -403,6 +437,11 @@ export class PolkaCrewRoom {
     else void this.safeSend({ type: 'vote', target });
   }
 
+  sendMeetingChat(text: string) {
+    if (this.state.isHost) this.hostMeetingChat(this.selfId, text);
+    else void this.safeSend({ type: 'chat', text });
+  }
+
   publishSettlement(settlement: SettlementNotice) {
     if (!this.state.isHost || this.state.phase !== 'ended' || !this.state.settleable) return;
     this.state.settlement = settlement;
@@ -524,6 +563,9 @@ export class PolkaCrewRoom {
       case 'vote':
         if (this.state.isHost) this.hostVote(sender, message.target);
         break;
+      case 'chat':
+        if (this.state.isHost) this.hostMeetingChat(sender, message.text);
+        break;
       case 'match-ended':
         if (!this.state.isHost) {
           this.state.finalSnapshot = message.snapshot;
@@ -582,7 +624,7 @@ export class PolkaCrewRoom {
       x: clamp(requestedX, 38, ROOM_WORLD.width - 38),
       y: clamp(requestedY, 46, ROOM_WORLD.height - 46),
     };
-    if (player.alive) target = resolveDoorCollision(player, target, this.state.doors, Date.now());
+    if (player.alive) target = resolveWorldCollision(player, target, this.state.doors, Date.now());
     const dx = target.x - player.x;
     const dy = target.y - player.y;
     const requestedDistance = Math.hypot(dx, dy);
@@ -625,7 +667,7 @@ export class PolkaCrewRoom {
       actor.cooldowns.killUntil = now + KILL_COOLDOWN_MS;
       const body: RoomBody = {
         id: crypto.randomUUID(), victimId: victim.id, victimName: victim.name, color: victim.color,
-        x: victim.x, y: victim.y, killedAt: now, reported: false,
+        skinId: victim.skinId, x: victim.x, y: victim.y, killedAt: now, reported: false,
       };
       this.state.bodies.push(body);
       this.events.push({ t: now, type: 'kill', actor: actorId, target: victim.id, data: { bodyId: body.id } });
@@ -682,7 +724,7 @@ export class PolkaCrewRoom {
     for (const door of Object.values(this.state.doors)) door.lockedUntil = 0;
     this.state.phase = 'meeting';
     this.state.meeting = {
-      reason, reporterId, bodyId, startedAt: now, endsAt: now + MEETING_DURATION_MS, votes: {},
+      reason, reporterId, bodyId, startedAt: now, endsAt: now + MEETING_DURATION_MS, votes: {}, chat: [],
     };
     this.events.push({ t: now, type: 'meeting', actor: reporterId, data: { reason, bodyId } });
     this.broadcastSnapshot();
@@ -702,6 +744,21 @@ export class PolkaCrewRoom {
     else this.broadcastSnapshot();
   }
 
+  private hostMeetingChat(actorId: string, rawText: string) {
+    const meeting = this.state.meeting;
+    const actor = this.state.players[actorId];
+    if (this.state.phase !== 'meeting' || !meeting || meeting.resolved || !actor?.alive || !actor.connected) return;
+    const now = Date.now();
+    if (now - (this.lastChatAt[actorId] ?? 0) < 700) return;
+    const text = rawText.replace(/\s+/g, ' ').trim().slice(0, 140);
+    if (!text) return;
+    this.lastChatAt[actorId] = now;
+    meeting.chat.push({ id: crypto.randomUUID(), senderId: actorId, senderName: actor.name, text, sentAt: now });
+    if (meeting.chat.length > 30) meeting.chat.splice(0, meeting.chat.length - 30);
+    this.events.push({ t: now, type: 'chat', actor: actorId, data: { text } });
+    this.broadcastSnapshot();
+  }
+
   private resolveMeeting() {
     const meeting = this.state.meeting;
     if (!meeting || meeting.resolved) return;
@@ -712,8 +769,10 @@ export class PolkaCrewRoom {
     }, {});
     const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const winner = ranked[0];
-    if (winner && winner[0] !== 'skip' && (!ranked[1] || winner[1] > ranked[1][1])) {
-      const ejected = this.state.players[winner[0]];
+    const tied = Boolean(winner && ranked[1] && winner[1] === ranked[1][1]);
+    let ejected: RoomPlayer | undefined;
+    if (winner && winner[0] !== 'skip' && !tied) {
+      ejected = this.state.players[winner[0]];
       if (ejected?.alive) {
         ejected.alive = false;
         this.events.push({ t: Date.now(), type: 'eject', target: ejected.id });
@@ -727,6 +786,20 @@ export class PolkaCrewRoom {
         player.cooldowns.sabotageUntil = Math.max(player.cooldowns.sabotageUntil, now + 12_000);
       }
     }
+    meeting.result = {
+      ejectedId: ejected?.id,
+      ejectedName: ejected?.name,
+      wasSaboteur: ejected ? this.roles[ejected.id] === 'saboteur' : undefined,
+      skipped: !winner || (winner[0] === 'skip' && !tied),
+      tied,
+      resumeAt: now + 4_500,
+    };
+    meeting.endsAt = meeting.result.resumeAt;
+    this.broadcastSnapshot();
+  }
+
+  private resumeAfterMeeting() {
+    if (!this.state.meeting?.resolved) return;
     this.state.meeting = undefined;
     this.state.phase = 'playing';
     this.checkWin();
@@ -775,6 +848,7 @@ export class PolkaCrewRoom {
         tasksDone: player.tasksDone,
         h160Address: player.h160Address,
         productAddress: player.productAddress,
+        skinId: player.skinId,
       })),
       events: [...this.events],
     };
@@ -818,6 +892,7 @@ export class PolkaCrewRoom {
     return {
       id: this.selfId,
       name: this.identity.name,
+      skinId: this.identity.skinId,
       h160Address: this.identity.h160Address,
       productAddress: this.identity.productAddress,
       ready: false,
@@ -840,10 +915,11 @@ export class PolkaCrewRoom {
     };
   }
 
-  private makeRemotePlayer(id: string, player: { name: string; h160Address?: `0x${string}`; productAddress?: string; ready: boolean }, index: number): RoomPlayer {
+  private makeRemotePlayer(id: string, player: { name: string; skinId: CrewSkinId; h160Address?: `0x${string}`; productAddress?: string; ready: boolean }, index: number): RoomPlayer {
     return {
       id,
       ...player,
+      skinId: CREW_SKINS.some(skin => skin.id === player.skinId) ? player.skinId : 'relay-ranger',
       color: COLORS[index % COLORS.length],
       alive: true,
       connected: true,
@@ -889,6 +965,7 @@ export class PolkaCrewRoom {
     this.startedAt = 0;
     this.endedAt = 0;
     this.lastMoveAt = {};
+    this.lastChatAt = {};
   }
 }
 
@@ -904,13 +981,13 @@ function initialDoors() {
   return Object.fromEntries(BASE_DOORS.map(door => [door.id, { ...door }]));
 }
 
-function resolveDoorCollision(
+function resolveWorldCollision(
   current: { x: number; y: number },
   next: { x: number; y: number },
   doors: Record<string, DoorState>,
   now: number,
 ) {
-  let out = { ...next };
+  let out = resolveWallCollision(current, next);
   const radius = 18;
   for (const door of Object.values(doors)) {
     if (door.lockedUntil <= now) continue;
@@ -924,6 +1001,21 @@ function resolveDoorCollision(
       if (withinSpan && crossed) out.x = current.x;
     }
   }
+  return out;
+}
+
+function resolveWallCollision(current: { x: number; y: number }, next: { x: number; y: number }) {
+  const radius = 18;
+  const collides = (point: { x: number; y: number }) => MAP_WALLS.some(wall =>
+    point.x + radius > wall.x
+      && point.x - radius < wall.x + wall.width
+      && point.y + radius > wall.y
+      && point.y - radius < wall.y + wall.height,
+  );
+  const out = { x: next.x, y: current.y };
+  if (collides(out)) out.x = current.x;
+  out.y = next.y;
+  if (collides(out)) out.y = current.y;
   return out;
 }
 

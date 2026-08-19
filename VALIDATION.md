@@ -1,4 +1,4 @@
-# v0.5.1 validation status
+# v0.5.2 validation status
 
 ## Passed in the build workspace
 
@@ -12,20 +12,18 @@
   - origin allowlist rejection
   - lobby host migration
   - live-match host-loss abort
-- TypeScript model validation across `src/`, Playwright config and `e2e/` using temporary external-package type shims. This checks PolkaCrew's internal types and syntax without pretending the unavailable npm packages were installed.
+- Full TypeScript project build using Product SDK 0.22.0 and TypeScript 5.9.
+- Vite production build across 1,606 modules, including the restored Neon Orbital art pack.
+- Current Product SDK `Result` handling validated in the wallet, cloud-storage and contract adapter paths.
 - Static Solidity structure check: balanced braces plus required proposal/attestation/expiry/cancellation entry points.
-- Neon Orbital Canvas merge type-check passed with temporary React shims; the v0.5 room/relay types compile together with the merged `MultiplayerCanvas.tsx`.
-- GitHub asset manifest verified before packaging: all eight expected Neon Orbital files exist at `public/assets/polkacrew/`.
+- GitHub asset manifest verified: all eight expected Neon Orbital files exist in source and production `dist/`.
 
 ## Must pass in a clean networked environment before Devnet publishing
 
-The workspace could not finish `npm install` because package downloads timed out. Therefore these gates are intentionally **not** claimed as passed here:
+The build used an existing dependency cache. A clean install, Product-host browser smoke test and PolkaVM contract build remain release gates:
 
 ```bash
 npm install
-npm run typecheck
-npm run build
-npm run test:relay
 npm run test:e2e
 npm run contracts:build
 ```

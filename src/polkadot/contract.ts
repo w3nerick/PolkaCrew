@@ -70,7 +70,7 @@ export async function createMatchContractAdapter(context: ContractContext): Prom
       import('@parity/product-sdk-descriptors/devnet-asset-hub'),
     ]);
 
-    const manager = await ContractManager.fromLiveClient(
+    const managerResult = await ContractManager.fromLiveClient(
       manifest as never,
       context.rawAssetHub as never,
       devnet_asset_hub,
@@ -79,6 +79,8 @@ export async function createMatchContractAdapter(context: ContractContext): Prom
         defaultSigner: context.signer as never,
       },
     );
+    if (managerResult.ok === false) throw managerResult.error;
+    const manager = managerResult.value;
     const contract = manager.getContract(POLKACREW_RESULTS_PACKAGE) as any;
     const address = manager.getAddress(POLKACREW_RESULTS_PACKAGE) as `0x${string}`;
     let mapped = false;
@@ -90,7 +92,7 @@ export async function createMatchContractAdapter(context: ContractContext): Prom
         context.productAddress as never,
         context.signer as never,
       );
-      if (!result.ok) throw result.error;
+      if (result.ok === false) throw result.error;
       mapped = true;
     };
 

@@ -79,18 +79,18 @@ export async function connectPolkadotProduct(): Promise<ProductSession> {
 
     const manager = new wallet.SignerManager({ dappName: 'polkacrew.dot' });
     const connected = await manager.connect();
-    if (!connected.ok) throw connected.error;
+    if (connected.ok === false) throw connected.error;
     const walletAccount = connected.value.find(account => account.address === preferredAddress) ?? connected.value[0];
     if (!walletAccount) throw new Error('Polkadot host returned no signing account');
     const selected = manager.selectAccount(walletAccount.address);
-    if (!selected.ok) throw selected.error;
+    if (selected.ok === false) throw selected.error;
     app.wallet.selectAccount(walletAccount.address);
 
     // Current Products host exposes a canonical app-scoped, signable Product
     // Account. It replaces the deprecated deriveContextAlias() path and is the
     // identity used for pallet-revive contract transactions.
     const productResult = await manager.getProductAccount('polkacrew.dot');
-    if (!productResult.ok) throw productResult.error;
+    if (productResult.ok === false) throw productResult.error;
     const productAccount = productResult.value;
     const client = await chain.getChainAPI('devnet');
     const cloud = app.cloudStorage;
@@ -127,12 +127,12 @@ export async function connectPolkadotProduct(): Promise<ProductSession> {
       computeReplayCid: async snapshot => String(await cloud.computeCid(new TextEncoder().encode(canonicalJson(snapshot)))),
       uploadReplay: async snapshot => {
         const result = await cloud.upload(new TextEncoder().encode(canonicalJson(snapshot)));
-        if (!result.ok) throw result.error;
+        if (result.ok === false) throw result.error;
         return String(result.value);
       },
       fetchReplay: async cid => {
         const result = await cloud.fetch(cid);
-        if (!result.ok) throw result.error;
+        if (result.ok === false) throw result.error;
         return JSON.parse(new TextDecoder().decode(result.value)) as MatchSnapshot;
       },
       proveDotIdentity: async (message, dotUsername) => {

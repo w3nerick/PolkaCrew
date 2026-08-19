@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2
+
+- Added player-selected Neon Orbital crew models and synchronized the choice through multiplayer snapshots.
+- Restored the tracked visual pack that v0.5.1 still referenced at runtime.
+- Added permanent wall geometry and host-validated collision in addition to sabotage door locks.
+- Added living-player meeting chat with host validation, rate limiting and replay events.
+- Added a timed consensus-result phase with tie, skip and role-aware ejection animation.
+- Added local kill feedback, victim signal-loss effects and optional procedural ambient audio.
+- Added a recent-match memory that records local results and attaches Bulletin/Asset Hub verification state.
+- Updated the Product SDK contract adapter to unwrap current `Result` APIs and restored a clean TypeScript production build.
+
 ## 0.5.1
 
 - Merged the Neon Orbital asset pack from the current GitHub `main` into the v0.5 pre-deploy gameplay.

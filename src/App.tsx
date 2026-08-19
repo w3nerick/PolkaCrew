@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { MultiplayerCanvas } from './components/MultiplayerCanvas';
 import { TaskMinigame } from './components/TaskMinigame';
 import { gameSound } from './game-sound';
-import { PolkaCrewRoom, ROOM_TASKS } from './multiplayer/room';
-import type { RoomState, RoomTask, SabotageKind } from './multiplayer/types';
+import { historyFromSnapshot, loadMatchHistory, upsertMatchHistory, type MatchHistoryEntry } from './match-history';
+import { CREW_SKINS, PolkaCrewRoom, ROOM_TASKS } from './multiplayer/room';
+import type { CrewSkinId, RoomState, RoomTask, SabotageKind } from './multiplayer/types';
 import { participantsForSettlement, prepareMatchForDevnet, verifyOnChainProposal, verifyPreparedMatch, type OnChainProposalVerification, type PreparedVerification } from './polkadot/match';
 import { connectPolkadotProduct, type ProductSession } from './polkadot/product';
 import type { ChainMatchStatus, PlayerStats } from './polkadot/contract';
@@ -20,6 +21,13 @@ export default function App() {
   const [room, setRoom] = useState<PolkaCrewRoom | null>(null);
   const [roomState, setRoomState] = useState<RoomState>(emptyRoomState);
   const [name, setName] = useState('Crewmate');
+  const [selectedSkin, setSelectedSkin] = useState<CrewSkinId>(() => {
+    const saved = typeof window === 'undefined' ? '' : window.localStorage.getItem('polkacrew.skin');
+    return CREW_SKINS.some(skin => skin.id === saved) ? saved as CrewSkinId : 'relay-ranger';
+  });
+  const [soundEnabled, setSoundEnabled] = useState(() => typeof window === 'undefined' || window.localStorage.getItem('polkacrew.sound') !== 'off');
+  const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>(loadMatchHistory);
+  const [impactFx, setImpactFx] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [settlementMessage, setSettlementMessage] = useState('');
@@ -31,7 +39,16 @@ export default function App() {
   const [activeTask, setActiveTask] = useState<RoomTask | null>(null);
   const [playerStats, setPlayerStats] = useState<PlayerStats | null>(null);
   const [clock, setClock] = useState(Date.now());
-  const previous = useRef({ bodies: 0, phase: 'home', sabotage: '' as string, winner: '' as string });
+  const previous = useRef({ phase: 'home', sabotage: '' as string, winner: '' as string, selfAlive: undefined as boolean | undefined });
+
+  useEffect(() => {
+    window.localStorage.setItem('polkacrew.skin', selectedSkin);
+  }, [selectedSkin]);
+
+  useEffect(() => {
+    gameSound.setMuted(!soundEnabled);
+    window.localStorage.setItem('polkacrew.sound', soundEnabled ? 'on' : 'off');
+  }, [soundEnabled]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 250);
@@ -55,6 +72,7 @@ export default function App() {
       setName(defaultName);
       const multiplayer = new PolkaCrewRoom({
         name: defaultName,
+        skinId: selectedSkin,
         h160Address: connected.productH160,
         productAddress: connected.productAccount,
       });
@@ -73,10 +91,11 @@ export default function App() {
     if (!room || !session) return;
     room.setIdentity({
       name: name.trim() || 'Crewmate',
+      skinId: selectedSkin,
       h160Address: session.productH160,
       productAddress: session.productAccount,
     });
-  }, [name, room, session]);
+  }, [name, selectedSkin, room, session]);
 
   useEffect(() => {
     if (!session?.productH160 || !session.contract.configured) return;
@@ -117,20 +136,50 @@ export default function App() {
   useEffect(() => {
     if (roomState.phase !== 'playing') setActiveTask(null);
     const prev = previous.current;
-    if (roomState.bodies.length > prev.bodies) gameSound.kill();
     if (roomState.phase === 'meeting' && prev.phase !== 'meeting') gameSound.report();
     if (roomState.sabotage?.kind && roomState.sabotage.kind !== prev.sabotage) gameSound.sabotage();
+    const selfAlive = roomState.players[roomState.selfId]?.alive;
+    if (prev.selfAlive === true && selfAlive === false && roomState.phase !== 'ended') {
+      gameSound.kill();
+      setImpactFx('SIGNAL LOST');
+      window.setTimeout(() => setImpactFx(null), 1_450);
+    }
     if (roomState.phase === 'ended' && prev.phase !== 'ended' && roomState.winner) {
       const me = roomState.finalSnapshot?.players.find(player => player.id === roomState.selfId);
       if (me && me.role === roomState.winner) gameSound.win(); else gameSound.lose();
     }
     previous.current = {
-      bodies: roomState.bodies.length,
       phase: roomState.phase,
       sabotage: roomState.sabotage?.kind ?? '',
       winner: roomState.winner ?? '',
+      selfAlive,
     };
-  }, [roomState.phase, roomState.bodies.length, roomState.sabotage?.kind, roomState.winner, roomState.finalSnapshot, roomState.selfId]);
+  }, [roomState.phase, roomState.players, roomState.sabotage?.kind, roomState.winner, roomState.finalSnapshot, roomState.selfId]);
+
+  useEffect(() => {
+    const snapshot = roomState.finalSnapshot;
+    if (!snapshot) return;
+    setMatchHistory(entries => {
+      const existing = entries.find(entry => entry.id === snapshot.id);
+      return upsertMatchHistory(entries, { ...historyFromSnapshot(snapshot, roomState.selfId, roomState.roomId), ...existing });
+    });
+  }, [roomState.finalSnapshot?.id, roomState.roomId, roomState.selfId]);
+
+  useEffect(() => {
+    const snapshot = roomState.finalSnapshot;
+    if (!snapshot || (!roomState.settlement && !chainStatus)) return;
+    setMatchHistory(entries => {
+      const existing = entries.find(entry => entry.id === snapshot.id)
+        ?? historyFromSnapshot(snapshot, roomState.selfId, roomState.roomId);
+      return upsertMatchHistory(entries, {
+        ...existing,
+        replayCid: roomState.settlement?.replayCid ?? existing.replayCid,
+        chainMatchId: roomState.settlement?.matchId ?? existing.chainMatchId,
+        finalized: chainStatus?.finalized ?? existing.finalized,
+        cancelled: chainStatus?.cancelled ?? existing.cancelled,
+      });
+    });
+  }, [roomState.finalSnapshot?.id, roomState.settlement?.matchId, roomState.settlement?.replayCid, chainStatus?.finalized, chainStatus?.cancelled, roomState.roomId, roomState.selfId]);
 
   const self = roomState.players[roomState.selfId];
   const players = useMemo(() => Object.values(roomState.players), [roomState.players]);
@@ -150,6 +199,7 @@ export default function App() {
   const createRoom = () => {
     setSettlementError('');
     setSettlementMessage('');
+    gameSound.startAmbient();
     room?.createRoom();
   };
 
@@ -157,6 +207,7 @@ export default function App() {
     try {
       setSettlementError('');
       setSettlementMessage('');
+      gameSound.startAmbient();
       room?.joinRoom(joinCode);
     } catch (error) {
       setSettlementError(error instanceof Error ? error.message : String(error));
@@ -172,6 +223,20 @@ export default function App() {
     if (!activeTask || !room) return;
     room.completeTask(activeTask.id);
     setActiveTask(null);
+  };
+
+  const strikeCrew = () => {
+    if (!room?.canKill(clock)) return;
+    gameSound.kill();
+    setImpactFx('FORK EXECUTED');
+    window.setTimeout(() => setImpactFx(null), 900);
+    room.kill();
+  };
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    if (next) gameSound.startAmbient();
   };
 
   const publishResult = async () => {
@@ -298,20 +363,22 @@ export default function App() {
 
   return <main className="app-shell">
     <header className="topbar">
-      <div><div className="eyebrow">POLKADOT PRODUCTS DEVNET · v0.5.1 PRE-DEPLOY</div><h1>POLKA<span>CREW</span></h1></div>
+      <div><div className="eyebrow">POLKADOT PRODUCTS DEVNET · v0.5.2 GAME LOOP</div><h1>POLKA<span>CREW</span></h1></div>
       <div className="top-status">
+        <button className="sound-toggle" onClick={toggleSound}>{soundEnabled ? 'SOUND ON' : 'SOUND OFF'}</button>
         <div className="host-pill"><i className={roomState.networkStatus === 'connected' ? 'online' : ''}/>{roomState.networkStatus.toUpperCase()}</div>
         <div className="host-pill"><i className={session.mode === 'polkadot-host' ? 'online' : ''}/>{session.mode === 'polkadot-host' ? 'POLKADOT HOST' : 'LOCAL DEV'}</div>
       </div>
     </header>
 
-    {roomState.phase === 'home' && <section className="home-grid">
+    {roomState.phase === 'home' && <><section className="home-grid">
       <div className="hero-card">
         <div className="eyebrow">SOCIAL DEDUCTION · POLKADOT NATIVE</div>
         <h2>Sabotage the ship.<br/><span>Not the truth.</span></h2>
         <p>Fast realtime gameplay stays off-chain. Clean match replays are pinned to Bulletin and only participant-verified results earn permanent XP on Asset Hub.</p>
         <div className="feature-row"><span>☠ Bodies + reports</span><span>⚠ Sabotage</span><span>🧩 Mini tasks</span><span>🔐 Verified settlement</span></div>
         <label>PLAYER NAME<input value={name} maxLength={18} onChange={(event: { target: { value: string } }) => setName(event.target.value)} /></label>
+        <div className="skin-picker"><div className="eyebrow">SELECT CREW MODEL</div><div className="skin-grid">{CREW_SKINS.map(skin => <button key={skin.id} className={selectedSkin === skin.id ? 'selected' : ''} onClick={() => setSelectedSkin(skin.id)}><img src={skin.asset} alt=""/><span>{skin.label}</span><small>{skin.specialty}</small></button>)}</div></div>
         <div className="home-actions"><button className="primary big" onClick={createRoom}>CREATE ROOM</button><div className="join-row"><input placeholder="ROOM CODE" maxLength={5} value={joinCode} onChange={(event: { target: { value: string } }) => setJoinCode(event.target.value.toUpperCase())}/><button onClick={joinRoom}>JOIN</button></div></div>
         {settlementError && <p className="error-line">{settlementError}</p>}
       </div>
@@ -330,7 +397,7 @@ export default function App() {
         <div className="stat"><span>CDM contract</span><b>{session.contract.configured ? 'RESOLVED' : 'NOT INSTALLED'}</b></div>
         <p className="hint">Product Account signs PolkaCrew state. .dot identity and personhood stay separate.</p>
       </aside>
-    </section>}
+    </section><MatchHistoryPanel entries={matchHistory}/></>}
 
     {roomState.phase === 'lobby' && <section className="lobby-card panel">
       <div className="lobby-head"><div><div className="eyebrow">ROOM CODE</div><div className="room-code">{roomState.roomId}</div></div><button className="ghost" onClick={() => room.leave()}>LEAVE</button></div>
@@ -355,6 +422,7 @@ export default function App() {
 
       <section className="stage">
         <MultiplayerCanvas room={room} state={roomState}/>
+        {impactFx && <div className="impact-flash"><span>{impactFx}</span></div>}
         {roomState.sabotage && roomState.phase === 'playing' && <div className={`sabotage-banner ${roomState.sabotage.kind}`}><b>{sabotageLabel(roomState.sabotage.kind)}</b><span>{roomState.sabotage.kind === 'reactor' ? `${Math.ceil(sabotageRemaining/1000)}s` : roomState.sabotage.kind === 'doors' ? `${Math.ceil(sabotageRemaining/1000)}s` : 'REPAIR REQUIRED'}</span></div>}
         {activeTask && roomState.phase === 'playing' && <TaskMinigame task={activeTask} onComplete={finishTask} onCancel={() => setActiveTask(null)}/>}
         {roomState.phase === 'meeting' && roomState.meeting && <MeetingOverlay state={roomState} room={room} remaining={meetingRemaining}/>}
@@ -386,7 +454,7 @@ export default function App() {
           <button className="action repair" disabled={!room.canFixSabotage()} onClick={() => room.fixSabotage()}>⚡ Repair sabotage<small>{nearestFix ? `${Math.round(nearestFix.d)}m · ${nearestFix.panel.label}` : roomState.sabotage ? 'Find the repair panel' : 'Systems nominal'}</small></button>
         </>}
         {roomState.selfRole === 'saboteur' && <>
-          <button className="action danger" disabled={!room.canKill(clock)} onClick={() => room.kill()}>✦ Disable crew<small>{killCooldown ? `Cooldown ${seconds(killCooldown)}` : nearestVictim ? `${Math.round(nearestVictim.d)}m · ${nearestVictim.player.name}` : 'No target nearby'}</small></button>
+          <button className="action danger" disabled={!room.canKill(clock)} onClick={strikeCrew}>✦ Disable crew<small>{killCooldown ? `Cooldown ${seconds(killCooldown)}` : nearestVictim ? `${Math.round(nearestVictim.d)}m · ${nearestVictim.player.name}` : 'No target nearby'}</small></button>
           <div className="sabotage-grid">{(['reactor','lights','doors'] as SabotageKind[]).map(kind => <button key={kind} disabled={!room.canSabotage(kind, clock)} onClick={() => room.sabotage(kind)}>{kind === 'reactor' ? '☢' : kind === 'lights' ? '◐' : '▥'}<small>{kind}</small></button>)}</div>
           <div className="cooldown-line">Sabotage {sabotageCooldown ? seconds(sabotageCooldown) : 'READY'}</div>
         </>}
@@ -402,11 +470,50 @@ function MeetingOverlay({ state, room, remaining }: { state: RoomState; room: Po
   const players = Object.values(state.players);
   const me = state.players[state.selfId];
   const myVote = meeting.votes[state.selfId];
+  const [chatText, setChatText] = useState('');
+  const sendChat = () => {
+    const text = chatText.trim();
+    if (!text) return;
+    room.sendMeetingChat(text);
+    setChatText('');
+  };
+
+  if (meeting.resolved && meeting.result) {
+    const result = meeting.result;
+    const ejected = result.ejectedId ? state.players[result.ejectedId] : undefined;
+    const skin = ejected ? CREW_SKINS.find(item => item.id === ejected.skinId) : undefined;
+    const title = result.tied ? 'CONSENSUS TIED' : result.skipped ? 'NO EJECTION' : `${result.ejectedName ?? 'UNKNOWN'} EJECTED`;
+    const detail = result.ejectedId
+      ? result.wasSaboteur ? 'A saboteur fork was removed.' : 'The crew expelled an innocent signal.'
+      : result.tied ? 'The votes could not reach consensus.' : 'The crew chose to skip this vote.';
+    return <div className="overlay meeting ejection-overlay"><div className="dialog ejection-card">
+      <div className="eyebrow">CONSENSUS RESULT</div>
+      {skin && <img src={skin.asset} alt=""/>}
+      <h2>{title}</h2><p>{detail}</p>
+      <div className="resume-clock">Returning to Relay Ark in {Math.max(1, Math.ceil(remaining / 1000))}s</div>
+    </div></div>;
+  }
+
   return <div className="overlay meeting"><div className="dialog meeting-dialog">
     <div className="meeting-title"><div><div className="eyebrow">{meeting.reason === 'body' ? 'BODY REPORTED' : 'EMERGENCY CONSENSUS'}</div><h2>{meeting.reason === 'body' ? 'A crew member is down.' : 'Who is the saboteur?'}</h2></div><div className="meeting-clock">{Math.ceil(remaining/1000)}s</div></div>
-    <div className="vote-grid">{players.filter(player => player.alive).map(player => <button key={player.id} disabled={!me?.alive || Boolean(myVote)} onClick={() => { gameSound.vote(); room.vote(player.id); }}><i style={{background:player.color}}/><span>{player.name}<small>{player.connected ? '' : 'OFFLINE'}</small></span>{Object.values(meeting.votes).filter(v => v === player.id).length > 0 && <b>{Object.values(meeting.votes).filter(v => v === player.id).length}</b>}</button>)}<button className="skip-vote" disabled={!me?.alive || Boolean(myVote)} onClick={() => { gameSound.vote(); room.vote('skip'); }}>SKIP VOTE <b>{Object.values(meeting.votes).filter(v => v === 'skip').length || ''}</b></button></div>
+    <div className="meeting-body"><div className="vote-grid">{players.filter(player => player.alive).map(player => <button key={player.id} disabled={!me?.alive || Boolean(myVote)} onClick={() => { gameSound.vote(); room.vote(player.id); }}><i style={{background:player.color}}/><span>{player.name}<small>{player.connected ? '' : 'ONLINE'}</small></span>{Object.values(meeting.votes).filter(v => v === player.id).length > 0 && <b>{Object.values(meeting.votes).filter(v => v === player.id).length}</b>}</button>)}<button className="skip-vote" disabled={!me?.alive || Boolean(myVote)} onClick={() => { gameSound.vote(); room.vote('skip'); }}>SKIP VOTE <b>{Object.values(meeting.votes).filter(v => v === 'skip').length || ''}</b></button></div>
+      <div className="meeting-chat"><div className="chat-log">{meeting.chat.length ? meeting.chat.map(message => <div key={message.id} className={message.senderId === state.selfId ? 'mine' : ''}><b>{message.senderName}</b><span>{message.text}</span></div>) : <p>No messages yet. Share evidence before voting.</p>}</div><form onSubmit={event => { event.preventDefault(); sendChat(); }}><input value={chatText} maxLength={140} disabled={!me?.alive} onChange={event => setChatText(event.target.value)} placeholder={me?.alive ? 'Type evidence…' : 'Ghosts cannot influence consensus'}/><button disabled={!me?.alive || !chatText.trim()}>SEND</button></form></div>
+    </div>
     <p className="hint">Vote resolves when all connected living players vote, or when the timer expires. Disconnected players do not freeze the meeting.</p>
   </div></div>;
+}
+
+function MatchHistoryPanel({ entries }: { entries: MatchHistoryEntry[] }) {
+  return <section className="history-panel panel">
+    <div className="history-head"><div><div className="eyebrow">MATCH MEMORY</div><h3>Verifiable recent games</h3></div><span>{entries.length} saved locally</span></div>
+    {entries.length === 0 ? <p className="muted">Your completed matches will appear here. Bulletin CIDs and Asset Hub finalization are attached when available.</p> : <div className="history-grid">{entries.slice(0, 6).map(entry => <article key={entry.id}>
+      <div><b>{entry.won ? 'VICTORY' : 'DEFEAT'}</b><span>{new Date(entry.recordedAt).toLocaleDateString()}</span></div>
+      <strong>{entry.role?.toUpperCase() ?? 'UNKNOWN'} · {entry.tasksDone}/{ROOM_TASKS.length} TASKS</strong>
+      <small>Room {entry.roomId} · {entry.players} players</small>
+      <div className="history-status"><i className={entry.finalized ? 'finalized' : entry.replayCid ? 'bulletin' : entry.settleable ? 'pending' : 'local'}/>{entry.cancelled ? 'CANCELLED' : entry.finalized ? 'ASSET HUB FINALIZED' : entry.replayCid ? 'BULLETIN VERIFIED' : entry.settleable ? 'AWAITING SETTLEMENT' : 'LOCAL RESULT'}</div>
+      {entry.replayCid && <code title={entry.replayCid}>{short(entry.replayCid)}</code>}
+    </article>)}</div>}
+  </section>;
 }
 
 function ResultOverlay(props: {

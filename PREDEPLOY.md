@@ -1,14 +1,14 @@
-# PolkaCrew v0.5.1 pre-deploy test matrix
+# PolkaCrew v0.5.2 pre-deploy test matrix
 
 Do not publish the Product bundle until the clean-environment checks below are green.
 
 ## Build gates
 
-- [ ] All eight Neon Orbital files exist under `public/assets/polkacrew/` and load without Canvas fallback.
+- [x] All eight Neon Orbital files exist under `public/assets/polkacrew/` and are copied into `dist/`.
 - [ ] `npm install` completes from a clean clone.
-- [ ] `npm run typecheck` passes.
-- [ ] `npm run build` produces `dist/`.
-- [ ] `npm run test:relay` passes.
+- [x] TypeScript project build passes against Product SDK 0.22.0.
+- [x] Vite production build produces `dist/`.
+- [x] Relay security + recovery smoke test passes.
 - [ ] `npm run test:e2e` passes the Product-host shell smoke test.
 - [ ] `npm run contracts:build` passes.
 - [ ] `cdm install @w3nerick/polkacrew-results -n devnet` resolves the deployed v0.5 ABI/address.
@@ -23,6 +23,8 @@ Do not publish the Product bundle until the clean-environment checks below are g
 - [ ] Body report starts a meeting.
 - [ ] Emergency meeting limit/cooldown works.
 - [ ] Vote, skip and vote timeout all resolve.
+- [ ] Living-player meeting chat synchronizes; ghosts and rate-limited spam are rejected.
+- [ ] Ejection, tie and skip result animations complete before gameplay resumes.
 - [ ] Reactor sabotage loses if ignored and clears when both panels are fixed.
 - [ ] Lights sabotage limits crew vision and clears from the repair panel.
 - [ ] Door sabotage blocks movement and auto-unlocks.

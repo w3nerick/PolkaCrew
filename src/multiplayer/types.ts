@@ -2,9 +2,17 @@ import type { MatchSnapshot, Role } from '../types';
 
 export interface RoomIdentity {
   name: string;
+  skinId: CrewSkinId;
   h160Address?: `0x${string}`;
   productAddress?: string;
 }
+
+export type CrewSkinId =
+  | 'relay-ranger'
+  | 'chain-mechanic'
+  | 'bulletin-diver'
+  | 'validator-warden'
+  | 'orbit-medic';
 
 export interface PlayerCooldowns {
   killUntil: number;
@@ -44,10 +52,28 @@ export interface RoomBody {
   victimId: string;
   victimName: string;
   color: string;
+  skinId: CrewSkinId;
   x: number;
   y: number;
   killedAt: number;
   reported: boolean;
+}
+
+export interface MeetingChatMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  sentAt: number;
+}
+
+export interface MeetingResult {
+  ejectedId?: string;
+  ejectedName?: string;
+  wasSaboteur?: boolean;
+  skipped: boolean;
+  tied: boolean;
+  resumeAt: number;
 }
 
 export interface DoorState {
@@ -75,7 +101,9 @@ export interface MeetingState {
   startedAt: number;
   endsAt: number;
   votes: Record<string, string>;
+  chat: MeetingChatMessage[];
   resolved?: boolean;
+  result?: MeetingResult;
 }
 
 export interface SettlementNotice {
@@ -137,6 +165,7 @@ export type RoomWireMessage =
   | { type: 'move'; x: number; y: number }
   | { type: 'action'; action: 'task' | 'kill' | 'meeting' | 'report' | 'sabotage' | 'fix-sabotage'; target?: string; sabotage?: SabotageKind }
   | { type: 'vote'; target: string }
+  | { type: 'chat'; text: string }
   | { type: 'match-ended'; snapshot: MatchSnapshot }
   | { type: 'settlement'; settlement: SettlementNotice }
   | { type: 'settlement-attested'; h160Address: `0x${string}` }

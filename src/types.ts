@@ -15,6 +15,7 @@ export interface Player {
   isLocal?: boolean;
   h160Address?: `0x${string}`;
   productAddress?: string;
+  skinId?: string;
 }
 
 export interface TaskNode {
@@ -44,6 +45,7 @@ export interface GameEvent {
     | 'report'
     | 'meeting'
     | 'vote'
+    | 'chat'
     | 'eject'
     | 'sabotage'
     | 'sabotage-fixed'
