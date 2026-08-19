@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+contracts-cdm/node_modules/
+contracts-cdm/artifacts/
+contracts-cdm/cache/
+.cdm/
+cdm.json
+__pycache__/
+*.pyc
+.DS_Store
