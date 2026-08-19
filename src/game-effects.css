@@ -1,0 +1,64 @@
+.stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  opacity: .12;
+  background: repeating-linear-gradient(180deg, transparent 0, transparent 3px, rgba(105, 231, 255, .13) 4px);
+  mix-blend-mode: screen;
+  animation: deck-scan 9s linear infinite;
+}
+
+.overlay {
+  z-index: 3;
+  animation: overlay-in .22s ease-out;
+}
+
+.dialog {
+  animation: dialog-in .3s cubic-bezier(.2, .85, .2, 1.12);
+}
+
+.meeting .dialog {
+  box-shadow: 0 0 0 1px #ff4fbc55, 0 0 70px #ff2c9d33, 0 40px 100px #000;
+}
+
+.meeting .dialog::before {
+  content: '';
+  display: block;
+  height: 3px;
+  margin: -12px 0 18px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, #ff3cad, #63e8ff, transparent);
+  box-shadow: 0 0 18px #ff3cad;
+  animation: consensus-charge 1.4s ease-in-out infinite;
+}
+
+@keyframes deck-scan {
+  from { background-position: 0 0; }
+  to { background-position: 0 80px; }
+}
+
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(.88) translateY(16px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes consensus-charge {
+  0%, 100% { opacity: .38; transform: scaleX(.72); }
+  50% { opacity: 1; transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage::after,
+  .overlay,
+  .dialog,
+  .meeting .dialog::before {
+    animation: none;
+  }
+}

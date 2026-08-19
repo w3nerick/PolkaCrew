@@ -6,6 +6,7 @@ import { participantsForSettlement, prepareMatchForDevnet, verifyOnChainProposal
 import { connectPolkadotProduct, type ProductSession } from './polkadot/product';
 import type { ChainMatchStatus } from './polkadot/contract';
 import './styles.css';
+import './game-effects.css';
 
 const emptyRoomState: RoomState = {
   roomId: '', hostId: '', isHost: false, selfId: '', phase: 'home',
