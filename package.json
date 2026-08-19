@@ -1,20 +1,26 @@
 {
   "name": "polkacrew",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "scripts": {
+    "sync:cdm": "node scripts/sync-cdm.mjs",
+    "predev": "npm run sync:cdm",
     "dev": "vite",
+    "prebuild": "npm run sync:cdm",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "pretypecheck": "npm run sync:cdm",
     "typecheck": "tsc -b --pretty false",
     "relay": "python3 relay_server.py",
     "contracts:install": "cd contracts-cdm && npm install",
-    "contracts:build": "cd contracts-cdm && npm run build"
+    "contracts:build": "cd contracts-cdm && npm run build",
+    "cdm:install": "cdm install @w3nerick/polkacrew-results -n devnet",
+    "test:relay": "python3 scripts/test-relay-security.py"
   },
   "dependencies": {
-    "@parity/product-sdk": "latest",
-    "@parity/product-sdk-descriptors": "latest",
+    "@parity/product-sdk": "^0.22.0",
+    "@parity/product-sdk-descriptors": "^0.9.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

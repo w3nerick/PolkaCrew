@@ -1,4 +1,7 @@
-import type { MatchSnapshot } from '../types';
+import type { MatchSnapshot, Role } from '../types';
+import { canonicalJson } from './canonical';
+import { createMatchContractAdapter, type ChainMatchStatus, type MatchContractStatus } from './contract';
+import { readPolkaCrewPersonhood, type PersonhoodStatus } from './personhood';
 
 export type ProductMode = 'local' | 'polkadot-host';
 
@@ -17,40 +20,45 @@ export interface DevnetStatus {
 export interface ProductSession {
   mode: ProductMode;
   account?: string;
-  alias?: string;
-  aliasH160?: string;
+  accountH160?: `0x${string}`;
+  productAccount?: string;
+  productH160?: `0x${string}`;
+  username?: string;
   devnet: DevnetStatus;
+  personhood: PersonhoodStatus;
+  contract: MatchContractStatus;
   computeReplayCid: (snapshot: MatchSnapshot) => Promise<string>;
   uploadReplay: (snapshot: MatchSnapshot) => Promise<string>;
+  fetchReplay: (cid: string) => Promise<MatchSnapshot>;
   proveDotIdentity: (message: string, username?: string) => Promise<IdentityProof | null>;
+  proposeMatch: (input: {
+    matchId: `0x${string}`;
+    replayCid: string;
+    winner: Role;
+    participants: `0x${string}`[];
+    won: boolean[];
+  }) => Promise<void>;
+  attestMatch: (matchId: `0x${string}`) => Promise<void>;
+  getMatchStatus: (matchId: `0x${string}`) => Promise<ChainMatchStatus | null>;
+  hasAttested: (matchId: `0x${string}`, h160Address: `0x${string}`) => Promise<boolean>;
+  getMatchParticipants: (matchId: `0x${string}`) => Promise<`0x${string}`[]>;
+  participantWon: (matchId: `0x${string}`, h160Address: `0x${string}`) => Promise<boolean | null>;
   destroy: () => void;
 }
 
 const bytesToHex = (bytes: Uint8Array) =>
-  `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
+  `0x${Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')}`;
 
 async function localDigest(snapshot: MatchSnapshot): Promise<string> {
-  const raw = JSON.stringify(snapshot);
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-  return `local-${Array.from(new Uint8Array(digest)).map(v => v.toString(16).padStart(2, '0')).join('')}`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJson(snapshot)));
+  return `local-${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`;
 }
 
-/**
- * Connects PolkaCrew to the current Polkadot Products Devnet host.
- *
- * Important Devnet rules intentionally encoded here:
- * - createApp cloudStorage.environment is explicitly "devnet" because the SDK default is Paseo.
- * - wallet signing comes from SignerManager, never an app-managed seed.
- * - getChainAPI("devnet") is used for Asset Hub / Bulletin / People connectivity.
- * - the public game identity is a deterministic per-app context alias.
- * - DotNS identity proof is available without exposing or storing keys.
- */
 export async function connectPolkadotProduct(): Promise<ProductSession> {
   try {
-    const [sdk, wallet, identity, chain, descriptors] = await Promise.all([
+    const [sdk, wallet, chain, descriptors] = await Promise.all([
       import('@parity/product-sdk'),
       import('@parity/product-sdk/wallet'),
-      import('@parity/product-sdk/identity'),
       import('@parity/product-sdk/chain'),
       import('@parity/product-sdk-descriptors/devnet-individuality'),
     ]);
@@ -60,63 +68,120 @@ export async function connectPolkadotProduct(): Promise<ProductSession> {
       cloudStorage: { environment: 'devnet' },
     });
 
-    const manager = new wallet.SignerManager();
+    // `createApp()` owns the wallet signer used by Cloud Storage and .dot identity
+    // proofs, so connect it explicitly before any Bulletin upload. A second
+    // SignerManager exposes the richer Product Account API required by contracts.
+    const appConnection = await app.wallet.connect();
+    const preferredAddress = appConnection.accounts[0]?.address;
+    if (!preferredAddress) throw new Error('Polkadot host returned no wallet account');
+
+    const manager = new wallet.SignerManager({ dappName: 'polkacrew.dot' });
     const connected = await manager.connect();
     if (!connected.ok) throw connected.error;
-    const account = connected.value[0];
-    if (!account) throw new Error('Polkadot host returned no wallet account');
-    manager.selectAccount(account.address);
+    const walletAccount = connected.value.find(account => account.address === preferredAddress) ?? connected.value[0];
+    if (!walletAccount) throw new Error('Polkadot host returned no signing account');
+    const selected = manager.selectAccount(walletAccount.address);
+    if (!selected.ok) throw selected.error;
+    app.wallet.selectAccount(walletAccount.address);
 
+    // Current Products host exposes a canonical app-scoped, signable Product
+    // Account. It replaces the deprecated deriveContextAlias() path and is the
+    // identity used for pallet-revive contract transactions.
+    const productResult = await manager.getProductAccount('polkacrew.dot');
+    if (!productResult.ok) throw productResult.error;
+    const productAccount = productResult.value;
     const client = await chain.getChainAPI('devnet');
-    const alias = identity.deriveContextAlias(account.address, 'polkacrew');
     const cloud = app.cloudStorage;
     if (!cloud) throw new Error('PolkaCrew Cloud Storage is disabled');
 
-    // Touch all three Product chains so the session reports the topology it actually uses.
+    const userResult = await manager.getUserId();
+    const username = userResult.ok ? userResult.value.primaryUsername : undefined;
+
     await Promise.all([
-      client.assetHub.query.System.Account.getValue(account.address),
+      client.assetHub.query.System.Account.getValue(productAccount.address),
       client.bulletin.query.TransactionStorage.ByteFee.getValue(),
-      // People/Individuality is intentionally reached through the DotNS identity proof API below.
+    ]);
+
+    const [contractAdapter, personhood] = await Promise.all([
+      createMatchContractAdapter({
+        rawAssetHub: client.raw.assetHub,
+        productAddress: productAccount.address,
+        productH160: productAccount.h160Address,
+        signer: productAccount.getSigner(),
+      }),
+      readPolkaCrewPersonhood(client.raw.assetHub, walletAccount.h160Address),
     ]);
 
     return {
       mode: 'polkadot-host',
-      account: account.address,
-      alias: alias.address,
-      aliasH160: alias.h160Address,
+      account: walletAccount.address,
+      accountH160: walletAccount.h160Address,
+      productAccount: productAccount.address,
+      productH160: productAccount.h160Address,
+      username,
       devnet: { assetHubConnected: true, bulletinConnected: true, peopleConnected: true },
-      computeReplayCid: async (snapshot) => {
-        const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
-        return String(await cloud.computeCid(bytes));
-      },
-      uploadReplay: async (snapshot) => {
-        const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
-        const result = await cloud.upload(bytes);
+      personhood,
+      contract: contractAdapter.status,
+      computeReplayCid: async snapshot => String(await cloud.computeCid(new TextEncoder().encode(canonicalJson(snapshot)))),
+      uploadReplay: async snapshot => {
+        const result = await cloud.upload(new TextEncoder().encode(canonicalJson(snapshot)));
         if (!result.ok) throw result.error;
         return String(result.value);
       },
-      proveDotIdentity: async (message, username) => {
-        const proof = await app.wallet.signMessageWithDotNsIdentity({
-          peopleChain: descriptors.devnet_individuality,
-          ...(username ? { username } : {}),
-          message,
-        });
-        return {
-          username: proof.username,
-          accountId: proof.accountId,
-          signatureHex: bytesToHex(proof.signature),
-        };
+      fetchReplay: async cid => {
+        const result = await cloud.fetch(cid);
+        if (!result.ok) throw result.error;
+        return JSON.parse(new TextDecoder().decode(result.value)) as MatchSnapshot;
       },
-      destroy: () => client.destroy(),
+      proveDotIdentity: async (message, dotUsername) => {
+        try {
+          const proof = await app.wallet.signMessageWithDotNsIdentity({
+            peopleChain: descriptors.devnet_individuality,
+            ...(dotUsername ? { username: dotUsername } : {}),
+            message,
+          });
+          return {
+            username: proof.username,
+            accountId: proof.accountId,
+            signatureHex: bytesToHex(proof.signature),
+          };
+        } catch (error) {
+          // A Product Account is sufficient for contract authorization. The .dot
+          // proof enriches identity when the player has one, but does not lock
+          // username-less Devnet accounts out of multiplayer settlement.
+          console.info('[PolkaCrew] Optional .dot identity proof unavailable.', error);
+          return null;
+        }
+      },
+      proposeMatch: contractAdapter.proposeMatch,
+      attestMatch: contractAdapter.attestMatch,
+      getMatchStatus: contractAdapter.getMatch,
+      hasAttested: contractAdapter.hasAttested,
+      getMatchParticipants: contractAdapter.getParticipants,
+      participantWon: contractAdapter.participantWon,
+      destroy: () => {
+        client.destroy();
+        manager.destroy();
+      },
     };
   } catch (error) {
     console.info('[PolkaCrew] Products Devnet host unavailable; local development fallback active.', error);
+    const unavailable = async () => { throw new Error('On-chain settlement requires Polkadot App / dev-dot.li and an installed CDM contract.'); };
     return {
       mode: 'local',
       devnet: { assetHubConnected: false, bulletinConnected: false, peopleConnected: false },
+      personhood: { status: -1, tier: 'unknown', context: '0x' as `0x${string}` },
+      contract: { configured: false, reason: 'Local mode' },
       computeReplayCid: localDigest,
       uploadReplay: localDigest,
+      fetchReplay: async () => { throw new Error('Bulletin replay reads require the Polkadot Product host.'); },
       proveDotIdentity: async () => null,
+      proposeMatch: unavailable,
+      attestMatch: unavailable,
+      getMatchStatus: async () => null,
+      hasAttested: async () => false,
+      getMatchParticipants: async () => [],
+      participantWon: async () => null,
       destroy: () => undefined,
     };
   }

@@ -11,10 +11,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - run: npm install --no-audit --no-fund
+      - run: npm run typecheck
       - run: npm run build
-      - run: python3 -m py_compile relay_server.py
+      - run: python3 -m py_compile relay_server.py scripts/test-relay-security.py
+      - run: npm run test:relay
 
   contract:
     runs-on: ubuntu-latest
@@ -26,5 +27,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
+      - run: npm install --no-audit --no-fund
       - run: npm run build

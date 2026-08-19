@@ -13,6 +13,8 @@ export interface Player {
   tasksDone: number;
   totalTasks: number;
   isLocal?: boolean;
+  h160Address?: `0x${string}`;
+  productAddress?: string;
 }
 
 export interface TaskNode {
@@ -27,7 +29,7 @@ export interface MatchSnapshot {
   startedAt: number;
   endedAt?: number;
   winner?: Role;
-  players: Array<Pick<Player, 'id' | 'name' | 'role' | 'alive' | 'tasksDone'>>;
+  players: Array<Pick<Player, 'id' | 'name' | 'role' | 'alive' | 'tasksDone' | 'h160Address' | 'productAddress'>>;
   events: GameEvent[];
 }
 
